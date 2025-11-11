@@ -40,6 +40,7 @@
     .recording-toggle:hover{background:linear-gradient(180deg,#ff4757,#e63946)}
     .recording-toggle.paused{background:linear-gradient(180deg,#2a9d8f,#1b7566);border-color:rgba(255,255,255,0.15)}
     .recording-toggle.paused:hover{background:linear-gradient(180deg,#3bb3a3,#2a9d8f)}
+    .marker-size-input{width:60px}
   </style>
 </head>
 <body>
@@ -103,6 +104,15 @@
           <label class="small">Line width</label>
           <input id="lineWidth" type="number" value="4" min="1" max="40" style="width:64px">
         </div>
+        <div class="row">
+          <label class="btn small" for="markerImageInput">Upload marker image</label>
+          <input id="markerImageInput" type="file" accept="image/*">
+        </div>
+        <div class="row">
+          <label class="small">Marker size (radius)</label>
+          <input id="markerSize" class="marker-size-input" type="number" value="8" min="1" max="100">
+          <span class="small">px</span>
+        </div>
 
         <div class="info">How to use:</div>
         <div class="info">1) Upload map → Draw itinerary → Click Play.<br>Use mouse wheel to zoom, and middle-click drag to move.</div>
@@ -139,6 +149,8 @@
     const fullscreenPlayBtn=document.getElementById('fullscreenPlayBtn');
     const fullscreenExitBtn=document.getElementById('fullscreenExitBtn');
     const recordToggle=document.getElementById('recordToggle');
+    const markerImageInput=document.getElementById('markerImageInput');
+    const markerSizeInput=document.getElementById('markerSize');
 
     let img=new Image();
     let mapLoaded=false;
@@ -161,6 +173,8 @@
     let savedZoom=1;
     let savedOffsetX=0;
     let savedOffsetY=0;
+    let markerImage=null;
+    let markerImageLoaded=false;
 
     function resizeCanvases(w,h){
       mapCanvas.width=drawCanvas.width=w;
@@ -313,6 +327,37 @@
       return{x:a.x+(b.x-a.x)*segT,y:a.y+(b.y-a.y)*segT};
     }
 
+    function drawMarker(pos){
+      const markerRadius=Number(markerSizeInput.value||8);
+      
+      if(markerImageLoaded&&markerImage){
+        // Draw custom image as circular marker
+        drawCtx.save();
+        drawCtx.beginPath();
+        drawCtx.arc(pos.x,pos.y,markerRadius/zoom,0,Math.PI*2);
+        drawCtx.clip();
+        const size=markerRadius*2/zoom;
+        drawCtx.drawImage(markerImage,pos.x-markerRadius/zoom,pos.y-markerRadius/zoom,size,size);
+        drawCtx.restore();
+        
+        // Add border
+        drawCtx.beginPath();
+        drawCtx.arc(pos.x,pos.y,markerRadius/zoom,0,Math.PI*2);
+        drawCtx.lineWidth=2/zoom;
+        drawCtx.strokeStyle='rgba(255,255,255,0.6)';
+        drawCtx.stroke();
+      }else{
+        // Draw default red circle marker
+        drawCtx.beginPath();
+        drawCtx.fillStyle='rgba(255,80,80,0.95)';
+        drawCtx.arc(pos.x,pos.y,markerRadius/zoom,0,Math.PI*2);
+        drawCtx.fill();
+        drawCtx.lineWidth=2/zoom;
+        drawCtx.strokeStyle='rgba(255,255,255,0.6)';
+        drawCtx.stroke();
+      }
+    }
+
     function drawPlaybackFrame(elapsed){
       drawCtx.setTransform(1,0,0,1,0,0);
       drawCtx.clearRect(0,0,drawCanvas.width,drawCanvas.height);
@@ -331,13 +376,7 @@
       }
       drawCtx.stroke();
       if(showMarker.checked&&pos){
-        drawCtx.beginPath();
-        drawCtx.fillStyle='rgba(255,80,80,0.95)';
-        drawCtx.arc(pos.x,pos.y,8/zoom,0,Math.PI*2);
-        drawCtx.fill();
-        drawCtx.lineWidth=2/zoom;
-        drawCtx.strokeStyle='rgba(255,255,255,0.6)';
-        drawCtx.stroke();
+        drawMarker(pos);
       }
     }
 
@@ -426,6 +465,36 @@
           renderMap();
         };
         img.src=ev.target.result;
+      };
+      reader.readAsDataURL(f);
+    });
+
+    markerImageInput.addEventListener('change',e=>{
+      const f=e.target.files&&e.target.files[0];
+      if(!f)return;
+      const reader=new FileReader();
+      reader.onload=ev=>{
+        markerImage=new Image();
+        markerImage.onload=()=>{
+          // Resize if larger than 1024x1024
+          if(markerImage.width>1024||markerImage.height>1024){
+            const tempCanvas=document.createElement('canvas');
+            const scale=Math.min(1024/markerImage.width,1024/markerImage.height);
+            tempCanvas.width=markerImage.width*scale;
+            tempCanvas.height=markerImage.height*scale;
+            const tempCtx=tempCanvas.getContext('2d');
+            tempCtx.drawImage(markerImage,0,0,tempCanvas.width,tempCanvas.height);
+            const resizedImg=new Image();
+            resizedImg.onload=()=>{
+              markerImage=resizedImg;
+              markerImageLoaded=true;
+            };
+            resizedImg.src=tempCanvas.toDataURL();
+          }else{
+            markerImageLoaded=true;
+          }
+        };
+        markerImage.src=ev.target.result;
       };
       reader.readAsDataURL(f);
     });
