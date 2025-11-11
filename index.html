@@ -11,10 +11,13 @@
     .top{display:flex;gap:12px;align-items:center}
     h1{font-size:18px;margin:0;color:var(--accent)}
     .controls{margin-left:auto;display:flex;gap:12px;align-items:center}
-    .btn{background:linear-gradient(180deg,#0f1728,#0b1730);border:1px solid rgba(255,255,255,0.04);padding:8px 12px;border-radius:8px;color:#cfeef1;cursor:pointer;text-align:center}
+    .btn{background:linear-gradient(180deg,#0f1728,#0b1730);border:1px solid rgba(255,255,255,0.04);padding:8px 12px;border-radius:8px;color:#cfeef1;cursor:pointer;text-align:center;transition:all 0.3s ease}
     .button-group{display:flex;gap:10px;align-items:center}
     .button-group .btn{min-width:130px}
     .btn.primary{background:linear-gradient(90deg,#13b8b9,#2ec7ae);color:#022}
+    .btn.loaded{border:2px solid #13b8b9;box-shadow:0 0 15px rgba(19,184,185,0.5);background:linear-gradient(180deg,#0f1728,#0b1730)}
+    .btn .tick{display:none;margin-left:6px;color:#13b8b9;font-weight:bold}
+    .btn.loaded .tick{display:inline}
     input[type=file]{display:none}
     .layout{display:grid;grid-template-columns:1fr 320px;gap:14px;margin-top:14px}
     .viewer{position:relative;border-radius:8px;overflow:hidden;background:#071221;min-height:560px;cursor:crosshair}
@@ -34,6 +37,10 @@
     .fullscreen-btn:hover{background:linear-gradient(180deg,#13b8b9,#0b1730);border-color:rgba(255,255,255,0.2)}
     .fullscreen-controls{position:absolute;bottom:12px;right:12px;z-index:10;display:none;gap:10px;align-items:center}
     .fullscreen-controls.active{display:flex}
+    .pan-speed-control{position:absolute;bottom:12px;left:12px;z-index:10;display:none;gap:10px;align-items:center;background:linear-gradient(180deg,#0f1728,#0b1730);border:1px solid rgba(255,255,255,0.1);padding:10px 16px;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.3)}
+    .pan-speed-control.active{display:flex}
+    .pan-speed-control label{margin:0;color:#9fb4bd;font-size:13px}
+    .pan-speed-control input[type="range"]{width:120px}
     .viewer.fullscreen-mode{position:fixed;top:0;left:0;right:0;bottom:0;width:100vw!important;height:100vh!important;z-index:9999;border-radius:0;margin:0}
     .viewer.fullscreen-mode canvas{width:100%;height:100%}
     .recording-toggle{background:linear-gradient(180deg,#e63946,#c1121f);border:1px solid rgba(255,255,255,0.1);padding:4px 10px;border-radius:6px;color:#fff;cursor:pointer;font-size:12px;margin-left:8px;font-weight:600}
@@ -48,12 +55,11 @@
     <div class="top">
       <h1>Itinerary Player – Map Recorder & Replayer</h1>
       <div class="controls">
-        <div class="file-name" id="fileName">No map loaded</div>
         <div class="button-group">
-          <label class="btn" for="fileInput">Upload map</label>
+          <label class="btn" id="uploadMapBtn" for="fileInput">Upload map<span class="tick">✓</span></label>
           <input id="fileInput" type="file" accept="image/*">
-          <button id="exportBtn" class="btn">Export JSON</button>
-          <button id="importBtn" class="btn">Import JSON</button>
+          <label class="btn" id="uploadMarkerBtn" for="markerImageInput">Upload marker<span class="tick">✓</span></label>
+          <input id="markerImageInput" type="file" accept="image/*">
         </div>
       </div>
     </div>
@@ -63,6 +69,11 @@
         <canvas id="mapCanvas"></canvas>
         <canvas id="drawCanvas" style="position:absolute;left:0;top:0;pointer-events:auto"></canvas>
         <button id="fullscreenBtn" class="fullscreen-btn">⛶ Fullscreen</button>
+        <div id="panSpeedControl" class="pan-speed-control">
+          <label>Pan speed:</label>
+          <input id="panSpeed" type="range" min="1" max="20" step="1" value="5">
+          <span id="panSpeedLabel" style="color:#cfeef1;font-size:13px;min-width:30px">5</span>
+        </div>
         <div id="fullscreenControls" class="fullscreen-controls">
           <button id="fullscreenPlayBtn" class="btn primary">Play</button>
           <button id="fullscreenClearBtn" class="btn">Clear drawing</button>
@@ -88,7 +99,13 @@
           <button id="clearBtn" class="btn">Clear drawing</button>
         </div>
 
-        <label>Export / import</label>
+        <label>Data Management</label>
+        <div class="actions">
+          <button id="exportBtn" class="btn">Export JSON</button>
+          <button id="importBtn" class="btn">Import JSON</button>
+        </div>
+
+        <label>Export Snapshot</label>
         <div class="row">
           <button id="savePNG" class="btn">Save PNG snapshot</button>
         </div>
@@ -106,18 +123,12 @@
           <input id="lineWidth" type="number" value="4" min="1" max="40" style="width:64px">
         </div>
         <div class="row">
-          <label class="btn small" for="markerImageInput">Upload marker image</label>
-          <input id="markerImageInput" type="file" accept="image/*">
-        </div>
-        <div class="row">
           <label class="small">Marker size (radius)</label>
           <input id="markerSize" class="marker-size-input" type="number" value="25" min="1" max="100">
           <span class="small">px</span>
         </div>
 
-        <div class="info">How to use:</div>
-        <div class="info">1) Upload map → Draw itinerary → Click Play.<br>Use mouse wheel to zoom, and middle-click drag to move.</div>
-        <div class="footer">Tip: adjust color, width, or speed for a better effect.</div>
+        <div class="footer">Tip: Use mouse wheel to zoom, middle-click to pan.<br>Arrow keys or WASD to pan in fullscreen mode.</div>
       </div>
     </div>
   </div>
@@ -131,7 +142,8 @@
     const mapCtx=mapCanvas.getContext('2d');
     const drawCtx=drawCanvas.getContext('2d');
     const fileInput=document.getElementById('fileInput');
-    const fileName=document.getElementById('fileName');
+    const uploadMapBtn=document.getElementById('uploadMapBtn');
+    const uploadMarkerBtn=document.getElementById('uploadMarkerBtn');
     const recordingState=document.getElementById('recordingState');
     const pathLen=document.getElementById('pathLen');
     const playBtn=document.getElementById('playBtn');
@@ -153,6 +165,9 @@
     const recordToggle=document.getElementById('recordToggle');
     const markerImageInput=document.getElementById('markerImageInput');
     const markerSizeInput=document.getElementById('markerSize');
+    const panSpeedControl=document.getElementById('panSpeedControl');
+    const panSpeed=document.getElementById('panSpeed');
+    const panSpeedLabel=document.getElementById('panSpeedLabel');
 
     let img=new Image();
     let mapLoaded=false;
@@ -177,6 +192,8 @@
     let savedOffsetY=0;
     let markerImage=null;
     let markerImageLoaded=false;
+    let panAnimationFrame=null;
+    let keysPressed={};
 
     function resizeCanvases(w,h){
       mapCanvas.width=drawCanvas.width=w;
@@ -489,7 +506,6 @@
     fileInput.addEventListener('change',e=>{
       const f=e.target.files&&e.target.files[0];
       if(!f)return;
-      fileName.textContent=f.name;
       const reader=new FileReader();
       reader.onload=ev=>{
         img=new Image();
@@ -504,6 +520,7 @@
           offsetX=0;
           offsetY=0;
           renderMap();
+          uploadMapBtn.classList.add('loaded');
         };
         img.src=ev.target.result;
       };
@@ -529,10 +546,12 @@
             resizedImg.onload=()=>{
               markerImage=resizedImg;
               markerImageLoaded=true;
+              uploadMarkerBtn.classList.add('loaded');
             };
             resizedImg.src=tempCanvas.toDataURL();
           }else{
             markerImageLoaded=true;
+            uploadMarkerBtn.classList.add('loaded');
           }
         };
         markerImage.src=ev.target.result;
@@ -573,7 +592,7 @@
 
     exportBtn.addEventListener('click',()=>{
       if(path.length===0)return alert('No path');
-      const data={path,imgName:fileName.textContent};
+      const data={path};
       const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
       const a=document.createElement('a');
       a.href=URL.createObjectURL(blob);
@@ -633,6 +652,7 @@
       viewer.classList.add('fullscreen-mode');
       fullscreenBtn.style.display='none';
       fullscreenControls.classList.add('active');
+      panSpeedControl.classList.add('active');
       const w=window.innerWidth;
       const h=window.innerHeight;
       const oldW=900;
@@ -647,6 +667,7 @@
       
       renderMap();
       redrawOverlay();
+      startKeyboardPan();
     }
 
     function exitFullscreen(){
@@ -654,6 +675,7 @@
       viewer.classList.remove('fullscreen-mode');
       fullscreenBtn.style.display='block';
       fullscreenControls.classList.remove('active');
+      panSpeedControl.classList.remove('active');
       resizeCanvases(900,560);
       
       zoom=savedZoom;
@@ -662,15 +684,75 @@
       
       renderMap();
       redrawOverlay();
+      stopKeyboardPan();
     }
 
     fullscreenBtn.addEventListener('click',enterFullscreen);
     fullscreenExitBtn.addEventListener('click',exitFullscreen);
     fullscreenPlayBtn.addEventListener('click',togglePlay);
 
+    panSpeed.addEventListener('input',()=>panSpeedLabel.textContent=panSpeed.value);
+
+    function startKeyboardPan(){
+      function panLoop(){
+        if(!isFullscreen){
+          stopKeyboardPan();
+          return;
+        }
+        
+        const speed=Number(panSpeed.value);
+        let moved=false;
+        
+        if(keysPressed['ArrowUp']||keysPressed['w']||keysPressed['W']){
+          offsetY+=speed;
+          moved=true;
+        }
+        if(keysPressed['ArrowDown']||keysPressed['s']||keysPressed['S']){
+          offsetY-=speed;
+          moved=true;
+        }
+        if(keysPressed['ArrowLeft']||keysPressed['a']||keysPressed['A']){
+          offsetX+=speed;
+          moved=true;
+        }
+        if(keysPressed['ArrowRight']||keysPressed['d']||keysPressed['D']){
+          offsetX-=speed;
+          moved=true;
+        }
+        
+        if(moved){
+          renderMap();
+          redrawOverlay();
+        }
+        
+        panAnimationFrame=requestAnimationFrame(panLoop);
+      }
+      panLoop();
+    }
+
+    function stopKeyboardPan(){
+      if(panAnimationFrame){
+        cancelAnimationFrame(panAnimationFrame);
+        panAnimationFrame=null;
+      }
+      keysPressed={};
+    }
+
     document.addEventListener('keydown',e=>{
-      if(e.key==='Escape'&&isFullscreen){
-        exitFullscreen();
+      if(isFullscreen){
+        if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','w','W','a','A','s','S','d','D'].includes(e.key)){
+          e.preventDefault();
+          keysPressed[e.key]=true;
+        }
+        if(e.key==='Escape'){
+          exitFullscreen();
+        }
+      }
+    });
+
+    document.addEventListener('keyup',e=>{
+      if(isFullscreen){
+        delete keysPressed[e.key];
       }
     });
 
