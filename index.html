@@ -1,0 +1,531 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Itinerary Player – Map Recorder & Replayer</title>
+  <style>
+    :root{--bg:#0f1724;--panel:#0b1220;--accent:#22c1c3;--muted:#9aa4b2}
+    html,body{height:100%;margin:0;font-family:Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;color:#e6eef6;background:linear-gradient(180deg,#071022 0%, #071a2a 100%)}
+    .app{max-width:1100px;margin:28px auto;padding:18px;border-radius:12px;background:rgba(255,255,255,0.02);box-shadow:0 8px 30px rgba(2,6,23,0.6)}
+    .top{display:flex;gap:12px;align-items:center}
+    h1{font-size:18px;margin:0;color:var(--accent)}
+    .controls{margin-left:auto;display:flex;gap:12px;align-items:center}
+    .btn{background:linear-gradient(180deg,#0f1728,#0b1730);border:1px solid rgba(255,255,255,0.04);padding:8px 12px;border-radius:8px;color:#cfeef1;cursor:pointer;text-align:center}
+    .button-group{display:flex;gap:10px;align-items:center}
+    .button-group .btn{min-width:130px}
+    .btn.primary{background:linear-gradient(90deg,#13b8b9,#2ec7ae);color:#022}
+    input[type=file]{display:none}
+    .layout{display:grid;grid-template-columns:1fr 320px;gap:14px;margin-top:14px}
+    .viewer{position:relative;border-radius:8px;overflow:hidden;background:#071221;min-height:560px;cursor:crosshair}
+    canvas{display:block}
+    .sidebar{padding:12px;background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));border-radius:8px}
+    label{display:block;font-size:13px;color:var(--muted);margin-top:10px}
+    .small{font-size:13px;color:#cfeef1}
+    .row{display:flex;gap:8px;align-items:center;margin-top:8px}
+    .speed{width:150px}
+    .actions{display:flex;gap:8px;margin-top:12px}
+    .actions .btn{flex:1}
+    .info{font-size:13px;color:var(--muted);margin-top:8px}
+    .footer{margin-top:12px;font-size:12px;color:var(--muted)}
+    .file-name{font-size:13px;color:#cfeef1;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .hint{font-size:13px;color:#9fb4bd}
+    .fullscreen-btn{position:absolute;bottom:12px;right:12px;z-index:10;background:linear-gradient(180deg,#0f1728,#0b1730);border:1px solid rgba(255,255,255,0.1);padding:10px 16px;border-radius:8px;color:#cfeef1;cursor:pointer;font-size:13px;box-shadow:0 4px 12px rgba(0,0,0,0.3)}
+    .fullscreen-btn:hover{background:linear-gradient(180deg,#13b8b9,#0b1730);border-color:rgba(255,255,255,0.2)}
+    .fullscreen-controls{position:absolute;bottom:12px;right:12px;z-index:10;display:none;gap:10px;align-items:center}
+    .fullscreen-controls.active{display:flex}
+    .viewer.fullscreen-mode{position:fixed;top:0;left:0;right:0;bottom:0;width:100vw!important;height:100vh!important;z-index:9999;border-radius:0;margin:0}
+    .viewer.fullscreen-mode canvas{width:100%;height:100%}
+  </style>
+</head>
+<body>
+  <div class="app">
+    <div class="top">
+      <h1>Itinerary Player – Map Recorder & Replayer</h1>
+      <div class="controls">
+        <div class="file-name" id="fileName">No map loaded</div>
+        <div class="button-group">
+          <label class="btn" for="fileInput">Upload map</label>
+          <input id="fileInput" type="file" accept="image/*">
+          <button id="exportBtn" class="btn">Export JSON</button>
+          <button id="importBtn" class="btn">Import JSON</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="layout">
+      <div class="viewer" id="viewer">
+        <canvas id="mapCanvas"></canvas>
+        <canvas id="drawCanvas" style="position:absolute;left:0;top:0;pointer-events:auto"></canvas>
+        <button id="fullscreenBtn" class="fullscreen-btn">⛶ Fullscreen</button>
+        <div id="fullscreenControls" class="fullscreen-controls">
+          <button id="fullscreenPlayBtn" class="btn primary">Play</button>
+          <button id="fullscreenExitBtn" class="btn">⛶ Exit</button>
+        </div>
+      </div>
+
+      <div class="sidebar">
+        <div class="small"><strong>Controls</strong></div>
+        <label>Recording: <span id="recordingState">idle</span></label>
+        <label>Path length: <span id="pathLen">0</span> points</label>
+
+        <label class="hint">Playback speed</label>
+        <div class="row">
+          <input id="speed" class="speed" type="range" min="0.1" max="2" step="0.05" value="1">
+          <div id="speedLabel">1x</div>
+        </div>
+
+        <div class="actions">
+          <button id="playBtn" class="btn primary">Play</button>
+          <button id="clearBtn" class="btn">Clear drawing</button>
+        </div>
+
+        <label>Export / import</label>
+        <div class="row">
+          <button id="savePNG" class="btn">Save PNG snapshot</button>
+        </div>
+
+        <label>Line & Marker Style</label>
+        <div class="row">
+          <label class="small"><input id="showMarker" type="checkbox" checked> show marker</label>
+        </div>
+        <div class="row">
+          <label class="small">Line color</label>
+          <input id="lineColor" type="color" value="#22c1c3">
+        </div>
+        <div class="row">
+          <label class="small">Line width</label>
+          <input id="lineWidth" type="number" value="4" min="1" max="40" style="width:64px">
+        </div>
+
+        <div class="info">How to use:</div>
+        <div class="info">1) Upload map → Draw itinerary → Click Play.<br>Use mouse wheel to zoom, and middle-click drag to move.</div>
+        <div class="footer">Tip: adjust color, width, or speed for a better effect.</div>
+      </div>
+    </div>
+  </div>
+
+  <input id="hiddenJson" type="file" accept="application/json" style="display:none">
+
+  <script>
+    const mapCanvas=document.getElementById('mapCanvas');
+    const drawCanvas=document.getElementById('drawCanvas');
+    const viewer=document.getElementById('viewer');
+    const mapCtx=mapCanvas.getContext('2d');
+    const drawCtx=drawCanvas.getContext('2d');
+    const fileInput=document.getElementById('fileInput');
+    const fileName=document.getElementById('fileName');
+    const recordingState=document.getElementById('recordingState');
+    const pathLen=document.getElementById('pathLen');
+    const playBtn=document.getElementById('playBtn');
+    const speedRange=document.getElementById('speed');
+    const speedLabel=document.getElementById('speedLabel');
+    const showMarker=document.getElementById('showMarker');
+    const lineWidthInput=document.getElementById('lineWidth');
+    const lineColorInput=document.getElementById('lineColor');
+    const clearBtn=document.getElementById('clearBtn');
+    const exportBtn=document.getElementById('exportBtn');
+    const importBtn=document.getElementById('importBtn');
+    const hiddenJson=document.getElementById('hiddenJson');
+    const savePNG=document.getElementById('savePNG');
+    const fullscreenBtn=document.getElementById('fullscreenBtn');
+    const fullscreenControls=document.getElementById('fullscreenControls');
+    const fullscreenPlayBtn=document.getElementById('fullscreenPlayBtn');
+    const fullscreenExitBtn=document.getElementById('fullscreenExitBtn');
+
+    let img=new Image();
+    let mapLoaded=false;
+    let path=[];
+    let recording=false;
+    let recordStart=0;
+    let playing=false;
+    let pausedTime=0;
+    let animationReq=null;
+    let zoom=1;
+    let offsetX=0;
+    let offsetY=0;
+    let isPanning=false;
+    let startPan={x:0,y:0};
+    let imgWidth=0;
+    let imgHeight=0;
+    let isFullscreen=false;
+    let savedZoom=1;
+    let savedOffsetX=0;
+    let savedOffsetY=0;
+
+    function resizeCanvases(w,h){
+      mapCanvas.width=drawCanvas.width=w;
+      mapCanvas.height=drawCanvas.height=h;
+      renderMap();
+      redrawOverlay();
+    }
+
+    function renderMap(){
+      mapCtx.setTransform(1,0,0,1,0,0);
+      mapCtx.clearRect(0,0,mapCanvas.width,mapCanvas.height);
+      if(!mapLoaded)return;
+      mapCtx.setTransform(zoom,0,0,zoom,offsetX,offsetY);
+      mapCtx.drawImage(img,0,0);
+    }
+
+    function redrawOverlay(){
+      drawCtx.setTransform(1,0,0,1,0,0);
+      drawCtx.clearRect(0,0,drawCanvas.width,drawCanvas.height);
+      if(path.length===0)return;
+      drawCtx.setTransform(zoom,0,0,zoom,offsetX,offsetY);
+      drawCtx.lineJoin='round';
+      drawCtx.lineCap='round';
+      drawCtx.lineWidth=Number(lineWidthInput.value||4)/zoom;
+      drawCtx.strokeStyle=lineColorInput.value;
+      drawCtx.beginPath();
+      drawCtx.moveTo(path[0].x,path[0].y);
+      for(let i=1;i<path.length;i++)drawCtx.lineTo(path[i].x,path[i].y);
+      drawCtx.stroke();
+    }
+
+    function screenPos(e){
+      const r=drawCanvas.getBoundingClientRect();
+      const x=(e.clientX!==undefined?e.clientX:e.touches[0].clientX)-r.left;
+      const y=(e.clientY!==undefined?e.clientY:e.touches[0].clientY)-r.top;
+      return{x:(x-offsetX)/zoom,y:(y-offsetY)/zoom};
+    }
+
+    let isDown=false;
+
+    function pointerDown(e){
+      if(e.button===1){
+        isPanning=true;
+        startPan={x:e.clientX-offsetX,y:e.clientY-offsetY};
+        viewer.style.cursor='grab';
+        return;
+      }
+      e.preventDefault();
+      isDown=true;
+      const p=screenPos(e);
+      if(!recording){
+        recording=true;
+        recordStart=performance.now();
+        path=[];
+      }
+      const t=Math.round(performance.now()-recordStart);
+      path.push({x:p.x,y:p.y,t});
+      drawPoint(p.x,p.y);
+      updateInfo();
+    }
+
+    function pointerMove(e){
+      if(isPanning){
+        offsetX=e.clientX-startPan.x;
+        offsetY=e.clientY-startPan.y;
+        renderMap();
+        redrawOverlay();
+        return;
+      }
+      if(!isDown)return;
+      e.preventDefault();
+      const p=screenPos(e);
+      const t=Math.round(performance.now()-recordStart);
+      path.push({x:p.x,y:p.y,t});
+      drawLineTo(p.x,p.y);
+      updateInfo();
+    }
+
+    function pointerUp(e){
+      if(e.button===1){
+        isPanning=false;
+        viewer.style.cursor='crosshair';
+        return;
+      }
+      if(!isDown)return;
+      e.preventDefault();
+      isDown=false;
+      drawCtx.closePath();
+    }
+
+    function drawPoint(x,y){
+      drawCtx.setTransform(zoom,0,0,zoom,offsetX,offsetY);
+      drawCtx.lineJoin='round';
+      drawCtx.lineCap='round';
+      drawCtx.lineWidth=Number(lineWidthInput.value||4)/zoom;
+      drawCtx.strokeStyle=lineColorInput.value;
+      drawCtx.beginPath();
+      drawCtx.moveTo(x+0.1,y);
+      drawCtx.lineTo(x,y);
+      drawCtx.stroke();
+    }
+
+    function drawLineTo(x,y){
+      drawCtx.lineTo(x,y);
+      drawCtx.stroke();
+    }
+
+    function updateInfo(){
+      recordingState.textContent=recording?'recording':'idle';
+      pathLen.textContent=path.length;
+    }
+
+    function getTotalDuration(){
+      return path.length===0?0:path[path.length-1].t;
+    }
+
+    function positionAt(elapsed){
+      if(path.length===0)return null;
+      if(elapsed<=path[0].t)return{x:path[0].x,y:path[0].y};
+      if(elapsed>=path[path.length-1].t)return{x:path[path.length-1].x,y:path[path.length-1].y};
+      let lo=0,hi=path.length-1;
+      while(lo<hi){
+        const m=Math.floor((lo+hi)/2);
+        if(path[m].t<=elapsed)lo=m+1;
+        else hi=m;
+      }
+      const i=Math.max(1,lo);
+      const a=path[i-1],b=path[i];
+      const segT=(elapsed-a.t)/(b.t-a.t);
+      return{x:a.x+(b.x-a.x)*segT,y:a.y+(b.y-a.y)*segT};
+    }
+
+    function drawPlaybackFrame(elapsed){
+      drawCtx.setTransform(1,0,0,1,0,0);
+      drawCtx.clearRect(0,0,drawCanvas.width,drawCanvas.height);
+      if(path.length===0)return;
+      drawCtx.setTransform(zoom,0,0,zoom,offsetX,offsetY);
+      drawCtx.lineJoin='round';
+      drawCtx.lineCap='round';
+      drawCtx.lineWidth=Number(lineWidthInput.value||4)/zoom;
+      drawCtx.strokeStyle=lineColorInput.value;
+      drawCtx.beginPath();
+      const pos=positionAt(elapsed);
+      drawCtx.moveTo(path[0].x,path[0].y);
+      for(let i=1;i<path.length;i++){
+        if(path[i].t<=elapsed)drawCtx.lineTo(path[i].x,path[i].y);
+        else{drawCtx.lineTo(pos.x,pos.y);break;}
+      }
+      drawCtx.stroke();
+      if(showMarker.checked&&pos){
+        drawCtx.beginPath();
+        drawCtx.fillStyle='rgba(255,80,80,0.95)';
+        drawCtx.arc(pos.x,pos.y,8/zoom,0,Math.PI*2);
+        drawCtx.fill();
+        drawCtx.lineWidth=2/zoom;
+        drawCtx.strokeStyle='rgba(255,255,255,0.6)';
+        drawCtx.stroke();
+      }
+    }
+
+    let playStart=0;
+
+    function animate(){
+      const speed=Number(speedRange.value);
+      const now=performance.now();
+      const elapsed=(now-playStart+pausedTime)*speed;
+      const total=getTotalDuration();
+      if(elapsed>=total){
+        drawPlaybackFrame(total);
+        playing=false;
+        playBtn.textContent='Play';
+        fullscreenPlayBtn.textContent='Play';
+        return;
+      }
+      drawPlaybackFrame(elapsed);
+      animationReq=requestAnimationFrame(animate);
+    }
+
+    function togglePlay(){
+      if(path.length<2){
+        alert('Record at least two points.');
+        return;
+      }
+      if(!playing){
+        playing=true;
+        playStart=performance.now();
+        playBtn.textContent='Pause';
+        fullscreenPlayBtn.textContent='Pause';
+        animate();
+      } else {
+        playing=false;
+        cancelAnimationFrame(animationReq);
+        pausedTime+=performance.now()-playStart;
+        const total=getTotalDuration();
+        const speed=Number(speedRange.value);
+        const elapsed=(pausedTime)*speed;
+        if(elapsed>=total){
+          pausedTime=0;
+          playBtn.textContent='Play';
+          fullscreenPlayBtn.textContent='Play';
+        } else {
+          playBtn.textContent='Resume';
+          fullscreenPlayBtn.textContent='Resume';
+        }
+      }
+    }
+
+    fileInput.addEventListener('change',e=>{
+      const f=e.target.files&&e.target.files[0];
+      if(!f)return;
+      fileName.textContent=f.name;
+      const reader=new FileReader();
+      reader.onload=ev=>{
+        img=new Image();
+        img.onload=()=>{
+          mapLoaded=true;
+          imgWidth=img.width;
+          imgHeight=img.height;
+          const viewerW=900;
+          const viewerH=700;
+          resizeCanvases(viewerW,viewerH);
+          zoom=Math.min(viewerW/imgWidth,viewerH/imgHeight);
+          offsetX=0;
+          offsetY=0;
+          renderMap();
+        };
+        img.src=ev.target.result;
+      };
+      reader.readAsDataURL(f);
+    });
+
+    viewer.addEventListener('wheel',e=>{
+      e.preventDefault();
+      const rect=drawCanvas.getBoundingClientRect();
+      const mouseX=e.clientX-rect.left;
+      const mouseY=e.clientY-rect.top;
+      
+      const imgX=(mouseX-offsetX)/zoom;
+      const imgY=(mouseY-offsetY)/zoom;
+      
+      const delta=e.deltaY<0?1.05:0.95;
+      const newZoom=Math.min(Math.max(zoom*delta,0.05),20);
+      
+      offsetX=mouseX-imgX*newZoom;
+      offsetY=mouseY-imgY*newZoom;
+      zoom=newZoom;
+      
+      renderMap();
+      redrawOverlay();
+    });
+
+    ['pointerdown','mousedown','touchstart'].forEach(ev=>drawCanvas.addEventListener(ev,pointerDown));
+    ['pointermove','mousemove','touchmove'].forEach(ev=>drawCanvas.addEventListener(ev,pointerMove));
+    ['pointerup','mouseup','touchend','pointercancel','mouseleave'].forEach(ev=>drawCanvas.addEventListener(ev,pointerUp));
+
+    playBtn.addEventListener('click',togglePlay);
+    speedRange.addEventListener('input',()=>speedLabel.textContent=speedRange.value+'x');
+    clearBtn.addEventListener('click',()=>{
+      path=[];
+      recording=false;
+      playing=false;
+      pausedTime=0;
+      playBtn.textContent='Play';
+      fullscreenPlayBtn.textContent='Play';
+      cancelAnimationFrame(animationReq);
+      updateInfo();
+      redrawOverlay();
+    });
+    lineWidthInput.addEventListener('change',redrawOverlay);
+    lineColorInput.addEventListener('input',redrawOverlay);
+
+    exportBtn.addEventListener('click',()=>{
+      if(path.length===0)return alert('No path');
+      const data={path,imgName:fileName.textContent};
+      const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
+      const a=document.createElement('a');
+      a.href=URL.createObjectURL(blob);
+      a.download='itinerary.json';
+      a.click();
+    });
+
+    importBtn.addEventListener('click',()=>hiddenJson.click());
+
+    hiddenJson.addEventListener('change',e=>{
+      const f=e.target.files&&e.target.files[0];
+      if(!f)return;
+      const r=new FileReader();
+      r.onload=ev=>{
+        try{
+          const o=JSON.parse(ev.target.result);
+          if(o.path){
+            path=o.path;
+            recording=false;
+            playing=false;
+            pausedTime=0;
+            playBtn.textContent='Play';
+            fullscreenPlayBtn.textContent='Play';
+            cancelAnimationFrame(animationReq);
+            updateInfo();
+            redrawOverlay();
+          }
+        }catch{
+          alert('Invalid JSON');
+        }
+      };
+      r.readAsText(f);
+    });
+
+    savePNG.addEventListener('click',()=>{
+      const c=document.createElement('canvas');
+      c.width=mapCanvas.width;
+      c.height=mapCanvas.height;
+      const ctx=c.getContext('2d');
+      ctx.drawImage(mapCanvas,0,0);
+      ctx.drawImage(drawCanvas,0,0);
+      const url=c.toDataURL('image/png');
+      const a=document.createElement('a');
+      a.href=url;
+      a.download='itinerary.png';
+      a.click();
+    });
+
+    function enterFullscreen(){
+      savedZoom=zoom;
+      savedOffsetX=offsetX;
+      savedOffsetY=offsetY;
+      
+      isFullscreen=true;
+      viewer.classList.add('fullscreen-mode');
+      fullscreenBtn.style.display='none';
+      fullscreenControls.classList.add('active');
+      const w=window.innerWidth;
+      const h=window.innerHeight;
+      const oldW=900;
+      const oldH=560;
+      resizeCanvases(w,h);
+      
+      const scaleX=w/oldW;
+      const scaleY=h/oldH;
+      zoom=savedZoom*Math.min(scaleX,scaleY);
+      offsetX=savedOffsetX*scaleX;
+      offsetY=savedOffsetY*scaleY;
+      
+      renderMap();
+      redrawOverlay();
+    }
+
+    function exitFullscreen(){
+      isFullscreen=false;
+      viewer.classList.remove('fullscreen-mode');
+      fullscreenBtn.style.display='block';
+      fullscreenControls.classList.remove('active');
+      resizeCanvases(900,560);
+      
+      zoom=savedZoom;
+      offsetX=savedOffsetX;
+      offsetY=savedOffsetY;
+      
+      renderMap();
+      redrawOverlay();
+    }
+
+    fullscreenBtn.addEventListener('click',enterFullscreen);
+    fullscreenExitBtn.addEventListener('click',exitFullscreen);
+    fullscreenPlayBtn.addEventListener('click',togglePlay);
+
+    document.addEventListener('keydown',e=>{
+      if(e.key==='Escape'&&isFullscreen){
+        exitFullscreen();
+      }
+    });
+
+    resizeCanvases(900,560);
+    updateInfo();
+  </script>
+</body>
+</html>
