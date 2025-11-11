@@ -36,6 +36,10 @@
     .fullscreen-controls.active{display:flex}
     .viewer.fullscreen-mode{position:fixed;top:0;left:0;right:0;bottom:0;width:100vw!important;height:100vh!important;z-index:9999;border-radius:0;margin:0}
     .viewer.fullscreen-mode canvas{width:100%;height:100%}
+    .recording-toggle{background:linear-gradient(180deg,#e63946,#c1121f);border:1px solid rgba(255,255,255,0.1);padding:4px 10px;border-radius:6px;color:#fff;cursor:pointer;font-size:12px;margin-left:8px;font-weight:600}
+    .recording-toggle:hover{background:linear-gradient(180deg,#ff4757,#e63946)}
+    .recording-toggle.paused{background:linear-gradient(180deg,#2a9d8f,#1b7566);border-color:rgba(255,255,255,0.15)}
+    .recording-toggle.paused:hover{background:linear-gradient(180deg,#3bb3a3,#2a9d8f)}
   </style>
 </head>
 <body>
@@ -66,7 +70,9 @@
 
       <div class="sidebar">
         <div class="small"><strong>Controls</strong></div>
-        <label>Recording: <span id="recordingState">idle</span></label>
+        <label>Recording: <span id="recordingState">idle</span>
+          <button id="recordToggle" class="recording-toggle" style="display:none">Pause</button>
+        </label>
         <label>Path length: <span id="pathLen">0</span> points</label>
 
         <label class="hint">Playback speed</label>
@@ -132,12 +138,15 @@
     const fullscreenControls=document.getElementById('fullscreenControls');
     const fullscreenPlayBtn=document.getElementById('fullscreenPlayBtn');
     const fullscreenExitBtn=document.getElementById('fullscreenExitBtn');
+    const recordToggle=document.getElementById('recordToggle');
 
     let img=new Image();
     let mapLoaded=false;
     let path=[];
     let recording=false;
+    let recordingPaused=false;
     let recordStart=0;
+    let pausedRecordingTime=0;
     let playing=false;
     let pausedTime=0;
     let animationReq=null;
@@ -200,14 +209,23 @@
         return;
       }
       e.preventDefault();
+      
+      // Auto-resume if recording is paused
+      if(recordingPaused){
+        recordingPaused=false;
+        pausedRecordingTime+=performance.now()-lastPauseTime;
+        updateInfo();
+      }
+      
       isDown=true;
       const p=screenPos(e);
       if(!recording){
         recording=true;
         recordStart=performance.now();
+        pausedRecordingTime=0;
         path=[];
       }
-      const t=Math.round(performance.now()-recordStart);
+      const t=Math.round(performance.now()-recordStart-pausedRecordingTime);
       path.push({x:p.x,y:p.y,t});
       drawPoint(p.x,p.y);
       updateInfo();
@@ -221,10 +239,10 @@
         redrawOverlay();
         return;
       }
-      if(!isDown)return;
+      if(!isDown||recordingPaused)return;
       e.preventDefault();
       const p=screenPos(e);
-      const t=Math.round(performance.now()-recordStart);
+      const t=Math.round(performance.now()-recordStart-pausedRecordingTime);
       path.push({x:p.x,y:p.y,t});
       drawLineTo(p.x,p.y);
       updateInfo();
@@ -260,7 +278,18 @@
     }
 
     function updateInfo(){
-      recordingState.textContent=recording?'recording':'idle';
+      if(recordingPaused){
+        recordingState.textContent='paused';
+        recordToggle.textContent='Resume';
+        recordToggle.classList.add('paused');
+      }else{
+        recordingState.textContent=recording?'recording':'idle';
+        if(recording){
+          recordToggle.textContent='Pause';
+          recordToggle.classList.remove('paused');
+        }
+      }
+      recordToggle.style.display=recording||recordingPaused?'inline-block':'none';
       pathLen.textContent=path.length;
     }
 
@@ -313,6 +342,7 @@
     }
 
     let playStart=0;
+    let lastPauseTime=0;
 
     function animate(){
       const speed=Number(speedRange.value);
@@ -336,6 +366,12 @@
         return;
       }
       if(!playing){
+        // Auto-pause recording when playback starts
+        if(recording&&!recordingPaused){
+          recordingPaused=true;
+          lastPauseTime=performance.now();
+          updateInfo();
+        }
         playing=true;
         playStart=performance.now();
         playBtn.textContent='Pause';
@@ -358,6 +394,17 @@
         }
       }
     }
+
+    recordToggle.addEventListener('click',()=>{
+      if(!recording&&!recordingPaused)return;
+      recordingPaused=!recordingPaused;
+      if(recordingPaused){
+        lastPauseTime=performance.now();
+      }else{
+        pausedRecordingTime+=performance.now()-lastPauseTime;
+      }
+      updateInfo();
+    });
 
     fileInput.addEventListener('change',e=>{
       const f=e.target.files&&e.target.files[0];
@@ -412,6 +459,8 @@
     clearBtn.addEventListener('click',()=>{
       path=[];
       recording=false;
+      recordingPaused=false;
+      pausedRecordingTime=0;
       playing=false;
       pausedTime=0;
       playBtn.textContent='Play';
@@ -445,6 +494,8 @@
           if(o.path){
             path=o.path;
             recording=false;
+            recordingPaused=false;
+            pausedRecordingTime=0;
             playing=false;
             pausedTime=0;
             playBtn.textContent='Play';
