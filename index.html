@@ -65,6 +65,7 @@
         <button id="fullscreenBtn" class="fullscreen-btn">⛶ Fullscreen</button>
         <div id="fullscreenControls" class="fullscreen-controls">
           <button id="fullscreenPlayBtn" class="btn primary">Play</button>
+          <button id="fullscreenClearBtn" class="btn">Clear drawing</button>
           <button id="fullscreenExitBtn" class="btn">⛶ Exit</button>
         </div>
       </div>
@@ -110,7 +111,7 @@
         </div>
         <div class="row">
           <label class="small">Marker size (radius)</label>
-          <input id="markerSize" class="marker-size-input" type="number" value="8" min="1" max="100">
+          <input id="markerSize" class="marker-size-input" type="number" value="25" min="1" max="100">
           <span class="small">px</span>
         </div>
 
@@ -147,6 +148,7 @@
     const fullscreenBtn=document.getElementById('fullscreenBtn');
     const fullscreenControls=document.getElementById('fullscreenControls');
     const fullscreenPlayBtn=document.getElementById('fullscreenPlayBtn');
+    const fullscreenClearBtn=document.getElementById('fullscreenClearBtn');
     const fullscreenExitBtn=document.getElementById('fullscreenExitBtn');
     const recordToggle=document.getElementById('recordToggle');
     const markerImageInput=document.getElementById('markerImageInput');
@@ -311,6 +313,15 @@
       return path.length===0?0:path[path.length-1].t;
     }
 
+    function catmullRom(p0,p1,p2,p3,t){
+      const t2=t*t;
+      const t3=t2*t;
+      return{
+        x:0.5*((2*p1.x)+(p2.x-p0.x)*t+(2*p0.x-5*p1.x+4*p2.x-p3.x)*t2+(3*p1.x-p0.x-3*p2.x+p3.x)*t3),
+        y:0.5*((2*p1.y)+(p2.y-p0.y)*t+(2*p0.y-5*p1.y+4*p2.y-p3.y)*t2+(3*p1.y-p0.y-3*p2.y+p3.y)*t3)
+      };
+    }
+
     function positionAt(elapsed){
       if(path.length===0)return null;
       if(elapsed<=path[0].t)return{x:path[0].x,y:path[0].y};
@@ -324,11 +335,18 @@
       const i=Math.max(1,lo);
       const a=path[i-1],b=path[i];
       const segT=(elapsed-a.t)/(b.t-a.t);
-      return{x:a.x+(b.x-a.x)*segT,y:a.y+(b.y-a.y)*segT};
+      
+      // Use Catmull-Rom spline for smooth interpolation
+      const p0=i>=2?path[i-2]:path[i-1];
+      const p1=path[i-1];
+      const p2=path[i];
+      const p3=i+1<path.length?path[i+1]:path[i];
+      
+      return catmullRom(p0,p1,p2,p3,segT);
     }
 
     function drawMarker(pos){
-      const markerRadius=Number(markerSizeInput.value||8);
+      const markerRadius=Number(markerSizeInput.value||25);
       
       if(markerImageLoaded&&markerImage){
         // Draw custom image as circular marker
@@ -411,6 +429,15 @@
           lastPauseTime=performance.now();
           updateInfo();
         }
+        
+        // Reset if animation finished
+        const total=getTotalDuration();
+        const speed=Number(speedRange.value);
+        const elapsed=(pausedTime)*speed;
+        if(elapsed>=total){
+          pausedTime=0;
+        }
+        
         playing=true;
         playStart=performance.now();
         playBtn.textContent='Pause';
@@ -432,6 +459,20 @@
           fullscreenPlayBtn.textContent='Resume';
         }
       }
+    }
+
+    function clearDrawing(){
+      path=[];
+      recording=false;
+      recordingPaused=false;
+      pausedRecordingTime=0;
+      playing=false;
+      pausedTime=0;
+      playBtn.textContent='Play';
+      fullscreenPlayBtn.textContent='Play';
+      cancelAnimationFrame(animationReq);
+      updateInfo();
+      redrawOverlay();
     }
 
     recordToggle.addEventListener('click',()=>{
@@ -525,19 +566,8 @@
 
     playBtn.addEventListener('click',togglePlay);
     speedRange.addEventListener('input',()=>speedLabel.textContent=speedRange.value+'x');
-    clearBtn.addEventListener('click',()=>{
-      path=[];
-      recording=false;
-      recordingPaused=false;
-      pausedRecordingTime=0;
-      playing=false;
-      pausedTime=0;
-      playBtn.textContent='Play';
-      fullscreenPlayBtn.textContent='Play';
-      cancelAnimationFrame(animationReq);
-      updateInfo();
-      redrawOverlay();
-    });
+    clearBtn.addEventListener('click',clearDrawing);
+    fullscreenClearBtn.addEventListener('click',clearDrawing);
     lineWidthInput.addEventListener('change',redrawOverlay);
     lineColorInput.addEventListener('input',redrawOverlay);
 
