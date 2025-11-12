@@ -48,6 +48,14 @@
     .recording-toggle.paused{background:linear-gradient(180deg,#2a9d8f,#1b7566);border-color:rgba(255,255,255,0.15)}
     .recording-toggle.paused:hover{background:linear-gradient(180deg,#3bb3a3,#2a9d8f)}
     .marker-size-input{width:60px}
+    .separator{border-top:1px solid rgba(255,255,255,0.08);margin:16px 0}
+    .inline-row{display:flex;gap:8px;align-items:center}
+    .inline-row .small{margin:0}
+    .section-title{font-size:13px;color:var(--muted);margin-top:10px;margin-bottom:4px}
+    .status-row{display:flex;gap:12px;align-items:center;font-size:13px;color:#cfeef1;margin-top:8px}
+    .status-item{display:flex;gap:6px;align-items:center}
+    .main-actions{display:flex;gap:8px;margin-top:12px}
+    .main-actions .btn{flex:1}
   </style>
 </head>
 <body>
@@ -83,10 +91,26 @@
 
       <div class="sidebar">
         <div class="small"><strong>Controls</strong></div>
-        <label>Recording: <span id="recordingState">idle</span>
-          <button id="recordToggle" class="recording-toggle" style="display:none">Pause</button>
-        </label>
-        <label>Path length: <span id="pathLen">0</span> points</label>
+        
+        <div class="status-row">
+          <div class="status-item">
+            <span style="color:var(--muted)">Status:</span>
+            <span id="recordingState">idle</span>
+          </div>
+          <div class="status-item">
+            <span style="color:var(--muted)">Length:</span>
+            <span id="pathLen">0</span>
+          </div>
+          <div class="status-item">
+            <span style="color:var(--muted)">Time:</span>
+            <span id="recordingTime">0.00s</span>
+          </div>
+        </div>
+
+        <div class="main-actions">
+          <button id="playBtn" class="btn primary" style="flex:2">Play</button>
+          <button id="recordToggle" class="recording-toggle" style="display:none;flex:1">Pause</button>
+        </div>
 
         <label class="hint">Playback speed</label>
         <div class="row">
@@ -95,38 +119,43 @@
         </div>
 
         <div class="actions">
-          <button id="playBtn" class="btn primary">Play</button>
           <button id="clearBtn" class="btn">Clear drawing</button>
         </div>
 
-        <label>Data Management</label>
+        <div class="separator"></div>
+
+        <div class="section-title">Line & Marker Style</div>
+
+        <div class="inline-row" style="margin-top:8px">
+          <label class="small" style="min-width:70px">Line color</label>
+          <input id="lineColor" type="color" value="#22c1c3">
+          <label class="small" style="margin-left:8px;min-width:40px">Width</label>
+          <input id="lineWidth" type="number" value="4" min="1" max="40" style="width:60px">
+        </div>
+
+        <div class="inline-row" style="margin-top:8px">
+          <label class="small" style="min-width:80px">Marker size</label>
+          <input id="markerSize" class="marker-size-input" type="number" value="25" min="1" max="100">
+          <span class="small">px</span>
+        </div>
+
+        <div class="row" style="margin-top:8px">
+          <label class="small"><input id="showMarker" type="checkbox" checked> show marker</label>
+        </div>
+
+        <div class="separator"></div>
+
+        <div class="section-title">Data Management</div>
         <div class="actions">
           <button id="exportBtn" class="btn">Export JSON</button>
           <button id="importBtn" class="btn">Import JSON</button>
         </div>
 
-        <label>Export Snapshot</label>
-        <div class="row">
+        <div class="actions">
           <button id="savePNG" class="btn">Save PNG snapshot</button>
         </div>
 
-        <label>Line & Marker Style</label>
-        <div class="row">
-          <label class="small"><input id="showMarker" type="checkbox" checked> show marker</label>
-        </div>
-        <div class="row">
-          <label class="small">Line color</label>
-          <input id="lineColor" type="color" value="#22c1c3">
-        </div>
-        <div class="row">
-          <label class="small">Line width</label>
-          <input id="lineWidth" type="number" value="4" min="1" max="40" style="width:64px">
-        </div>
-        <div class="row">
-          <label class="small">Marker size (radius)</label>
-          <input id="markerSize" class="marker-size-input" type="number" value="25" min="1" max="100">
-          <span class="small">px</span>
-        </div>
+        <div class="separator"></div>
 
         <div class="footer">Tip: Use mouse wheel to zoom, middle-click to pan.<br>Arrow keys or WASD to pan in fullscreen mode.</div>
       </div>
@@ -146,6 +175,7 @@
     const uploadMarkerBtn=document.getElementById('uploadMarkerBtn');
     const recordingState=document.getElementById('recordingState');
     const pathLen=document.getElementById('pathLen');
+    const recordingTime=document.getElementById('recordingTime');
     const playBtn=document.getElementById('playBtn');
     const speedRange=document.getElementById('speed');
     const speedLabel=document.getElementById('speedLabel');
@@ -194,6 +224,7 @@
     let markerImageLoaded=false;
     let panAnimationFrame=null;
     let keysPressed={};
+    let timeUpdateInterval=null;
 
     function resizeCanvases(w,h){
       mapCanvas.width=drawCanvas.width=w;
@@ -247,6 +278,10 @@
       if(recordingPaused){
         recordingPaused=false;
         pausedRecordingTime+=performance.now()-lastPauseTime;
+        // Resume time update interval
+        if(!timeUpdateInterval){
+          timeUpdateInterval=setInterval(updateInfo,50);
+        }
         updateInfo();
       }
       
@@ -257,6 +292,9 @@
         recordStart=performance.now();
         pausedRecordingTime=0;
         path=[];
+        // Start time update interval
+        if(timeUpdateInterval)clearInterval(timeUpdateInterval);
+        timeUpdateInterval=setInterval(updateInfo,50);
       }
       const t=Math.round(performance.now()-recordStart-pausedRecordingTime);
       path.push({x:p.x,y:p.y,t});
@@ -324,6 +362,14 @@
       }
       recordToggle.style.display=recording||recordingPaused?'inline-block':'none';
       pathLen.textContent=path.length;
+      
+      // Update recording time
+      if(recording||recordingPaused){
+        const elapsed=(performance.now()-recordStart-pausedRecordingTime)/1000;
+        recordingTime.textContent=elapsed.toFixed(2)+'s';
+      }else{
+        recordingTime.textContent='0.00s';
+      }
     }
 
     function getTotalDuration(){
@@ -488,6 +534,10 @@
       playBtn.textContent='Play';
       fullscreenPlayBtn.textContent='Play';
       cancelAnimationFrame(animationReq);
+      if(timeUpdateInterval){
+        clearInterval(timeUpdateInterval);
+        timeUpdateInterval=null;
+      }
       updateInfo();
       redrawOverlay();
     }
@@ -497,8 +547,17 @@
       recordingPaused=!recordingPaused;
       if(recordingPaused){
         lastPauseTime=performance.now();
+        // Stop time update interval when paused
+        if(timeUpdateInterval){
+          clearInterval(timeUpdateInterval);
+          timeUpdateInterval=null;
+        }
       }else{
         pausedRecordingTime+=performance.now()-lastPauseTime;
+        // Resume time update interval when unpaused
+        if(!timeUpdateInterval){
+          timeUpdateInterval=setInterval(updateInfo,50);
+        }
       }
       updateInfo();
     });
