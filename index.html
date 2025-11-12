@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Itinerary Player – Map Recorder & Replayer</title>
+  <title>Itinerary Player — Map Recorder & Replayer</title>
   <style>
     :root{--bg:#0f1724;--panel:#0b1220;--accent:#22c1c3;--muted:#9aa4b2}
     html,body{height:100%;margin:0;font-family:Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;color:#e6eef6;background:linear-gradient(180deg,#071022 0%, #071a2a 100%)}
@@ -65,7 +65,7 @@
 <body>
   <div class="app">
     <div class="top">
-      <h1>Itinerary Player – Map Recorder & Replayer</h1>
+      <h1>Itinerary Player — Map Recorder & Replayer</h1>
       <div class="controls">
         <div class="button-group">
           <label class="btn" id="uploadMapBtn" for="fileInput">Upload map<span class="tick">✓</span></label>
@@ -174,6 +174,8 @@
   <input id="hiddenJson" type="file" accept="application/json" style="display:none">
 
   <script>
+    const UPDATE_INTERVAL = 50;
+    
     const mapCanvas=document.getElementById('mapCanvas');
     const drawCanvas=document.getElementById('drawCanvas');
     const viewer=document.getElementById('viewer');
@@ -286,13 +288,13 @@
       }
       e.preventDefault();
       
-      // Auto-resume if recording is paused
-      if(recordingPaused){
+      // Auto-resume if recording is paused (only in live mode)
+      if(recordingPaused&&recordingMode==='live'){
         recordingPaused=false;
         pausedRecordingTime+=performance.now()-lastPauseTime;
         // Resume time update interval
         if(!timeUpdateInterval){
-          timeUpdateInterval=setInterval(updateInfo,50);
+          timeUpdateInterval=setInterval(updateInfo,UPDATE_INTERVAL);
         }
         updateInfo();
       }
@@ -306,7 +308,7 @@
         path=[];
         // Start time update interval
         if(timeUpdateInterval)clearInterval(timeUpdateInterval);
-        timeUpdateInterval=setInterval(updateInfo,50);
+        timeUpdateInterval=setInterval(updateInfo,UPDATE_INTERVAL);
       }
       
       let t;
@@ -330,7 +332,7 @@
         redrawOverlay();
         return;
       }
-      if(!isDown||recordingPaused)return;
+      if(!isDown||(recordingPaused&&recordingMode==='live'))return;
       e.preventDefault();
       const p=screenPos(e);
       
@@ -356,7 +358,6 @@
       if(!isDown)return;
       e.preventDefault();
       isDown=false;
-      drawCtx.closePath();
     }
 
     function drawPoint(x,y){
@@ -377,18 +378,19 @@
     }
 
     function updateInfo(){
-      if(recordingPaused){
+      if(recordingPaused&&recordingMode==='live'){
         recordingState.textContent='paused';
         recordToggle.textContent='Resume';
         recordToggle.classList.add('paused');
       }else{
         recordingState.textContent=recording?'recording':'idle';
-        if(recording){
+        if(recording&&recordingMode==='live'){
           recordToggle.textContent='Pause';
           recordToggle.classList.remove('paused');
         }
       }
-      recordToggle.style.display=recording||recordingPaused?'inline-block':'none';
+      // Show pause button only in live mode
+      recordToggle.style.display=(recording||recordingPaused)&&recordingMode==='live'?'inline-block':'none';
       pathLen.textContent=path.length;
       
       // Update recording time
@@ -533,8 +535,22 @@
     let playStart=0;
     let lastPauseTime=0;
 
+    function getPlaybackSpeed(){
+      const sliderValue=Number(speedRange.value);
+      if(recordingMode==='live'){
+        // Live mode: use slider value directly (0.1x to 2x)
+        return sliderValue;
+      }else{
+        // Smooth mode: map 1-100 to speed values
+        // 50 = 0.1x (slowest from live mode)
+        // 100 = fastest
+        // Formula: speed = sliderValue / 500
+        return sliderValue/500;
+      }
+    }
+
     function animate(){
-      const speed=Number(speedRange.value);
+      const speed=getPlaybackSpeed();
       const now=performance.now();
       const elapsed=(now-playStart+pausedTime)*speed;
       const total=getTotalDuration();
@@ -555,8 +571,8 @@
         return;
       }
       if(!playing){
-        // Auto-pause recording when playback starts
-        if(recording&&!recordingPaused){
+        // Auto-pause recording when playback starts (only in live mode)
+        if(recording&&!recordingPaused&&recordingMode==='live'){
           recordingPaused=true;
           lastPauseTime=performance.now();
           updateInfo();
@@ -564,7 +580,7 @@
         
         // Reset if animation finished
         const total=getTotalDuration();
-        const speed=Number(speedRange.value);
+        const speed=getPlaybackSpeed();
         const elapsed=(pausedTime)*speed;
         if(elapsed>=total){
           pausedTime=0;
@@ -580,7 +596,7 @@
         cancelAnimationFrame(animationReq);
         pausedTime+=performance.now()-playStart;
         const total=getTotalDuration();
-        const speed=Number(speedRange.value);
+        const speed=getPlaybackSpeed();
         const elapsed=(pausedTime)*speed;
         if(elapsed>=total){
           pausedTime=0;
@@ -611,6 +627,30 @@
       redrawOverlay();
     }
 
+    function updateSpeedControl(){
+      if(recordingMode==='live'){
+        speedRange.min='0.1';
+        speedRange.max='2';
+        speedRange.step='0.05';
+        speedRange.value='1';
+        speedLabel.textContent='1x';
+      }else{
+        speedRange.min='1';
+        speedRange.max='100';
+        speedRange.step='1';
+        speedRange.value='50';
+        speedLabel.textContent='50';
+      }
+    }
+
+    function updateSpeedLabel(){
+      if(recordingMode==='live'){
+        speedLabel.textContent=speedRange.value+'x';
+      }else{
+        speedLabel.textContent=speedRange.value;
+      }
+    }
+
     // Mode switching
     liveModeBtn.addEventListener('click',()=>{
       if(recordingMode==='live')return;
@@ -625,6 +665,7 @@
       recordingMode='live';
       liveModeBtn.classList.add('active');
       smoothModeBtn.classList.remove('active');
+      updateSpeedControl();
       updateInfo();
     });
 
@@ -641,11 +682,13 @@
       recordingMode='smooth';
       smoothModeBtn.classList.add('active');
       liveModeBtn.classList.remove('active');
+      updateSpeedControl();
       updateInfo();
     });
 
     recordToggle.addEventListener('click',()=>{
       if(!recording&&!recordingPaused)return;
+      if(recordingMode!=='live')return; // Only works in live mode
       recordingPaused=!recordingPaused;
       if(recordingPaused){
         lastPauseTime=performance.now();
@@ -655,12 +698,10 @@
           timeUpdateInterval=null;
         }
       }else{
-        if(recordingMode==='live'){
-          pausedRecordingTime+=performance.now()-lastPauseTime;
-        }
+        pausedRecordingTime+=performance.now()-lastPauseTime;
         // Resume time update interval when unpaused
         if(!timeUpdateInterval){
-          timeUpdateInterval=setInterval(updateInfo,50);
+          timeUpdateInterval=setInterval(updateInfo,UPDATE_INTERVAL);
         }
       }
       updateInfo();
@@ -747,7 +788,7 @@
     ['pointerup','mouseup','touchend','pointercancel','mouseleave'].forEach(ev=>drawCanvas.addEventListener(ev,pointerUp));
 
     playBtn.addEventListener('click',togglePlay);
-    speedRange.addEventListener('input',()=>speedLabel.textContent=speedRange.value+'x');
+    speedRange.addEventListener('input',updateSpeedLabel);
     clearBtn.addEventListener('click',clearDrawing);
     fullscreenClearBtn.addEventListener('click',clearDrawing);
     lineWidthInput.addEventListener('change',redrawOverlay);
@@ -784,6 +825,7 @@
                 liveModeBtn.classList.add('active');
                 smoothModeBtn.classList.remove('active');
               }
+              updateSpeedControl();
             }
             recording=false;
             recordingPaused=false;
