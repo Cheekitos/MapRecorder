@@ -56,6 +56,10 @@
     .status-item{display:flex;gap:6px;align-items:center}
     .main-actions{display:flex;gap:8px;margin-top:12px}
     .main-actions .btn{flex:1}
+    .mode-selector{display:flex;gap:6px;align-items:center;margin-top:8px;margin-bottom:8px}
+    .mode-btn{background:linear-gradient(180deg,#0f1728,#0b1730);border:1px solid rgba(255,255,255,0.04);padding:5px 10px;border-radius:6px;color:#cfeef1;cursor:pointer;font-size:12px;transition:all 0.3s ease}
+    .mode-btn.active{border:2px solid #13b8b9;box-shadow:0 0 12px rgba(19,184,185,0.4);background:linear-gradient(180deg,#0f1728,#0b1730)}
+    .mode-btn:hover{border-color:rgba(255,255,255,0.15)}
   </style>
 </head>
 <body>
@@ -91,6 +95,11 @@
 
       <div class="sidebar">
         <div class="small"><strong>Controls</strong></div>
+        
+        <div class="mode-selector">
+          <button id="liveModeBtn" class="mode-btn active">Live mode</button>
+          <button id="smoothModeBtn" class="mode-btn">Smooth mode</button>
+        </div>
         
         <div class="status-row">
           <div class="status-item">
@@ -198,6 +207,8 @@
     const panSpeedControl=document.getElementById('panSpeedControl');
     const panSpeed=document.getElementById('panSpeed');
     const panSpeedLabel=document.getElementById('panSpeedLabel');
+    const liveModeBtn=document.getElementById('liveModeBtn');
+    const smoothModeBtn=document.getElementById('smoothModeBtn');
 
     let img=new Image();
     let mapLoaded=false;
@@ -225,6 +236,7 @@
     let panAnimationFrame=null;
     let keysPressed={};
     let timeUpdateInterval=null;
+    let recordingMode='live'; // 'live' or 'smooth'
 
     function resizeCanvases(w,h){
       mapCanvas.width=drawCanvas.width=w;
@@ -296,7 +308,15 @@
         if(timeUpdateInterval)clearInterval(timeUpdateInterval);
         timeUpdateInterval=setInterval(updateInfo,50);
       }
-      const t=Math.round(performance.now()-recordStart-pausedRecordingTime);
+      
+      let t;
+      if(recordingMode==='live'){
+        t=Math.round(performance.now()-recordStart-pausedRecordingTime);
+      }else{
+        // Smooth mode: use index-based timing
+        t=path.length;
+      }
+      
       path.push({x:p.x,y:p.y,t});
       drawPoint(p.x,p.y);
       updateInfo();
@@ -313,7 +333,15 @@
       if(!isDown||recordingPaused)return;
       e.preventDefault();
       const p=screenPos(e);
-      const t=Math.round(performance.now()-recordStart-pausedRecordingTime);
+      
+      let t;
+      if(recordingMode==='live'){
+        t=Math.round(performance.now()-recordStart-pausedRecordingTime);
+      }else{
+        // Smooth mode: use index-based timing
+        t=path.length;
+      }
+      
       path.push({x:p.x,y:p.y,t});
       drawLineTo(p.x,p.y);
       updateInfo();
@@ -365,15 +393,26 @@
       
       // Update recording time
       if(recording||recordingPaused){
-        const elapsed=(performance.now()-recordStart-pausedRecordingTime)/1000;
-        recordingTime.textContent=elapsed.toFixed(2)+'s';
+        if(recordingMode==='live'){
+          const elapsed=(performance.now()-recordStart-pausedRecordingTime)/1000;
+          recordingTime.textContent=elapsed.toFixed(2)+'s';
+        }else{
+          // In smooth mode, show point count instead
+          recordingTime.textContent=path.length+' pts';
+        }
       }else{
-        recordingTime.textContent='0.00s';
+        recordingTime.textContent=recordingMode==='live'?'0.00s':'0 pts';
       }
     }
 
     function getTotalDuration(){
-      return path.length===0?0:path[path.length-1].t;
+      if(path.length===0)return 0;
+      if(recordingMode==='live'){
+        return path[path.length-1].t;
+      }else{
+        // Smooth mode: return total number of points (each point = 1 time unit)
+        return path.length-1;
+      }
     }
 
     function catmullRom(p0,p1,p2,p3,t){
@@ -387,25 +426,42 @@
 
     function positionAt(elapsed){
       if(path.length===0)return null;
-      if(elapsed<=path[0].t)return{x:path[0].x,y:path[0].y};
-      if(elapsed>=path[path.length-1].t)return{x:path[path.length-1].x,y:path[path.length-1].y};
-      let lo=0,hi=path.length-1;
-      while(lo<hi){
-        const m=Math.floor((lo+hi)/2);
-        if(path[m].t<=elapsed)lo=m+1;
-        else hi=m;
+      
+      if(recordingMode==='live'){
+        // Live mode: use original timestamp-based logic
+        if(elapsed<=path[0].t)return{x:path[0].x,y:path[0].y};
+        if(elapsed>=path[path.length-1].t)return{x:path[path.length-1].x,y:path[path.length-1].y};
+        let lo=0,hi=path.length-1;
+        while(lo<hi){
+          const m=Math.floor((lo+hi)/2);
+          if(path[m].t<=elapsed)lo=m+1;
+          else hi=m;
+        }
+        const i=Math.max(1,lo);
+        const a=path[i-1],b=path[i];
+        const segT=(elapsed-a.t)/(b.t-a.t);
+        
+        const p0=i>=2?path[i-2]:path[i-1];
+        const p1=path[i-1];
+        const p2=path[i];
+        const p3=i+1<path.length?path[i+1]:path[i];
+        
+        return catmullRom(p0,p1,p2,p3,segT);
+      }else{
+        // Smooth mode: uniform interpolation between points
+        if(elapsed<=0)return{x:path[0].x,y:path[0].y};
+        if(elapsed>=path.length-1)return{x:path[path.length-1].x,y:path[path.length-1].y};
+        
+        const i=Math.min(Math.floor(elapsed)+1,path.length-1);
+        const segT=elapsed-(i-1);
+        
+        const p0=i>=2?path[i-2]:path[i-1];
+        const p1=path[i-1];
+        const p2=path[i];
+        const p3=i+1<path.length?path[i+1]:path[i];
+        
+        return catmullRom(p0,p1,p2,p3,segT);
       }
-      const i=Math.max(1,lo);
-      const a=path[i-1],b=path[i];
-      const segT=(elapsed-a.t)/(b.t-a.t);
-      
-      // Use Catmull-Rom spline for smooth interpolation
-      const p0=i>=2?path[i-2]:path[i-1];
-      const p1=path[i-1];
-      const p2=path[i];
-      const p3=i+1<path.length?path[i+1]:path[i];
-      
-      return catmullRom(p0,p1,p2,p3,segT);
     }
 
     function drawMarker(pos){
@@ -451,10 +507,23 @@
       drawCtx.beginPath();
       const pos=positionAt(elapsed);
       drawCtx.moveTo(path[0].x,path[0].y);
-      for(let i=1;i<path.length;i++){
-        if(path[i].t<=elapsed)drawCtx.lineTo(path[i].x,path[i].y);
-        else{drawCtx.lineTo(pos.x,pos.y);break;}
+      
+      if(recordingMode==='live'){
+        for(let i=1;i<path.length;i++){
+          if(path[i].t<=elapsed)drawCtx.lineTo(path[i].x,path[i].y);
+          else{drawCtx.lineTo(pos.x,pos.y);break;}
+        }
+      }else{
+        // Smooth mode: draw up to current position
+        const currentIndex=Math.floor(elapsed)+1;
+        for(let i=1;i<Math.min(currentIndex,path.length);i++){
+          drawCtx.lineTo(path[i].x,path[i].y);
+        }
+        if(currentIndex<path.length){
+          drawCtx.lineTo(pos.x,pos.y);
+        }
       }
+      
       drawCtx.stroke();
       if(showMarker.checked&&pos){
         drawMarker(pos);
@@ -542,6 +611,39 @@
       redrawOverlay();
     }
 
+    // Mode switching
+    liveModeBtn.addEventListener('click',()=>{
+      if(recordingMode==='live')return;
+      if(recording||recordingPaused){
+        alert('Cannot switch modes while recording. Clear the drawing first.');
+        return;
+      }
+      if(path.length>0){
+        alert('Cannot switch modes with existing path. Clear the drawing first.');
+        return;
+      }
+      recordingMode='live';
+      liveModeBtn.classList.add('active');
+      smoothModeBtn.classList.remove('active');
+      updateInfo();
+    });
+
+    smoothModeBtn.addEventListener('click',()=>{
+      if(recordingMode==='smooth')return;
+      if(recording||recordingPaused){
+        alert('Cannot switch modes while recording. Clear the drawing first.');
+        return;
+      }
+      if(path.length>0){
+        alert('Cannot switch modes with existing path. Clear the drawing first.');
+        return;
+      }
+      recordingMode='smooth';
+      smoothModeBtn.classList.add('active');
+      liveModeBtn.classList.remove('active');
+      updateInfo();
+    });
+
     recordToggle.addEventListener('click',()=>{
       if(!recording&&!recordingPaused)return;
       recordingPaused=!recordingPaused;
@@ -553,7 +655,9 @@
           timeUpdateInterval=null;
         }
       }else{
-        pausedRecordingTime+=performance.now()-lastPauseTime;
+        if(recordingMode==='live'){
+          pausedRecordingTime+=performance.now()-lastPauseTime;
+        }
         // Resume time update interval when unpaused
         if(!timeUpdateInterval){
           timeUpdateInterval=setInterval(updateInfo,50);
@@ -651,7 +755,7 @@
 
     exportBtn.addEventListener('click',()=>{
       if(path.length===0)return alert('No path');
-      const data={path};
+      const data={path,mode:recordingMode};
       const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
       const a=document.createElement('a');
       a.href=URL.createObjectURL(blob);
@@ -670,6 +774,17 @@
           const o=JSON.parse(ev.target.result);
           if(o.path){
             path=o.path;
+            // Set mode if saved in JSON
+            if(o.mode){
+              recordingMode=o.mode;
+              if(recordingMode==='smooth'){
+                smoothModeBtn.classList.add('active');
+                liveModeBtn.classList.remove('active');
+              }else{
+                liveModeBtn.classList.add('active');
+                smoothModeBtn.classList.remove('active');
+              }
+            }
             recording=false;
             recordingPaused=false;
             pausedRecordingTime=0;
